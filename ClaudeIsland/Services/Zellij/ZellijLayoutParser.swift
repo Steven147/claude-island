@@ -82,17 +82,36 @@ actor ZellijLayoutParser {
         return trimmed.hasPrefix(expected)
     }
 
+    private func extractQuotedAttribute(_ name: String, from line: String) -> String? {
+        guard let nameRange = line.range(of: "\(name)=\"") else { return nil }
+        let startIndex = nameRange.upperBound
+        var endIndex = startIndex
+
+        // Find closing quote, handling escapes
+        var isEscaped = false
+        for index in line.indices[startIndex...] {
+            let char = line[index]
+            if char == "\\" && !isEscaped {
+                isEscaped = true
+                continue
+            }
+            if char == "\"" && !isEscaped {
+                endIndex = index
+                break
+            }
+            isEscaped = false
+        }
+
+        guard endIndex > startIndex else { return nil }
+        return String(line[startIndex..<endIndex])
+    }
+
     private func parseTab(from line: String, iterator: inout Array<String>.Iterator, tabIndex: Int) -> ZellijTab? {
         // Parse: tab name="env" hide_floating_panes=true {
         var tabName = "tab-\(tabIndex)"
 
         // Extract tab name
-        if let nameRange = line.range(of: "name=\"") {
-            let startIndex = nameRange.upperBound
-            if let endIndex = line[startIndex...].firstIndex(of: "\"") {
-                tabName = String(line[startIndex..<endIndex])
-            }
-        }
+        tabName = extractQuotedAttribute("name", from: line) ?? "tab-\(tabIndex)"
 
         var panes: [ZellijPane] = []
 
@@ -122,31 +141,25 @@ actor ZellijLayoutParser {
         var isFloating = false
 
         // Extract cwd
-        if let cwdRange = line.range(of: "cwd=\"") {
-            let startIndex = cwdRange.upperBound
-            if let endIndex = line[startIndex...].firstIndex(of: "\"") {
-                cwd = String(line[startIndex..<endIndex])
-            }
-        }
+        cwd = extractQuotedAttribute("cwd", from: line) ?? ""
 
         // Extract command
-        if let cmdRange = line.range(of: "command=\"") {
-            let startIndex = cmdRange.upperBound
-            if let endIndex = line[startIndex...].firstIndex(of: "\"") {
-                command = String(line[startIndex..<endIndex])
-            }
-        }
+        command = extractQuotedAttribute("command", from: line)
 
         // Check if floating (pane in floating_panes block)
         isFloating = line.contains("floating") || line.contains("floating_panes")
 
-        // Skip nested content (recurisve panes)
+        // Skip nested content (recursive panes)
         if line.contains("{") {
-            var braceCount = 1
+            var braceCount = 0
+            // Count braces in current line first
+            for char in line where char == "{" { braceCount += 1 }
+            for char in line where char == "}" { braceCount -= 1 }
+
+            // Continue counting in subsequent lines
             while braceCount > 0, let nextLine = iterator.next() {
-                let trimmed = nextLine.trimmingCharacters(in: .whitespaces)
-                if trimmed.contains("{") { braceCount += 1 }
-                if trimmed.contains("}") { braceCount -= 1 }
+                for char in nextLine where char == "{" { braceCount += 1 }
+                for char in nextLine where char == "}" { braceCount -= 1 }
             }
         }
 
