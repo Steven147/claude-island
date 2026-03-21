@@ -58,9 +58,9 @@ actor TerminalMultiplexer {
         }
 
         Self.logger.info("No terminal multiplexer detected")
-        detectedType = .none
+        detectedType = MultiplexerType.none
         hasChecked = true
-        return .none
+        return MultiplexerType.none
     }
 
     /// Find target for a Claude process
