@@ -14,6 +14,12 @@ actor ZellijTargetFinder {
 
     nonisolated static let logger = Logger(subsystem: "com.claudeisland", category: "ZellijTargetFinder")
 
+    // MARK: - Cache Properties
+
+    private var cachedLayout: ZellijLayout?
+    private var cacheTimestamp: Date?
+    private let cacheValidityDuration: TimeInterval = 5.0 // 5 seconds cache
+
     private init() {}
 
     /// Find the zellij target for a given working directory
@@ -49,6 +55,15 @@ actor ZellijTargetFinder {
     // MARK: - Private Methods
 
     private func getLayout() async -> ZellijLayout? {
+        // Check if cache is valid
+        if let cached = cachedLayout,
+           let timestamp = cacheTimestamp,
+           Date().timeIntervalSince(timestamp) < cacheValidityDuration {
+            Self.logger.debug("Using cached zellij layout")
+            return cached
+        }
+
+        // Fetch new layout
         guard let zellijPath = await ZellijPathFinder.shared.getZellijPath() else {
             Self.logger.warning("Zellij executable not found")
             return nil
@@ -62,6 +77,11 @@ actor ZellijTargetFinder {
                 return nil
             }
 
+            // Update cache
+            cachedLayout = layout
+            cacheTimestamp = Date()
+            Self.logger.debug("Updated zellij layout cache")
+
             return layout
         } catch {
             Self.logger.error("Failed to get zellij layout: \(error.localizedDescription)")
@@ -72,7 +92,8 @@ actor ZellijTargetFinder {
     private func normalizePath(_ path: String) -> String {
         // Resolve relative paths and symlinks
         let url = URL(fileURLWithPath: path)
-        let standardized = url.standardized
+        let resolved = url.resolvingSymlinksInPath() // Resolve symlinks
+        let standardized = resolved.standardized
         return standardized.path
     }
 }
