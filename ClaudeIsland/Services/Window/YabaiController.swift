@@ -37,16 +37,33 @@ actor YabaiController {
     // MARK: - Private Implementation
 
     private func focusTmuxInstance(claudePid: Int, tree: [Int: ProcessInfo], windows: [YabaiWindow]) async -> Bool {
-        // Find the tmux target for this Claude process
-        guard let target = await TmuxController.shared.findTmuxTarget(forClaudePid: claudePid) else {
+        // Get working directory for this Claude process
+        guard let workingDirectory = ProcessTreeBuilder.shared.getWorkingDirectory(forPid: claudePid) else {
+            return false
+        }
+
+        // Find the multiplexer target for this Claude process
+        guard let (multiplexerType, target) = await TerminalMultiplexer.shared.findTarget(
+            claudePid: claudePid,
+            workingDir: workingDirectory
+        ) else {
             return false
         }
 
         // Switch to the correct pane
-        _ = await TmuxController.shared.switchToPane(target: target)
+        _ = await TerminalMultiplexer.shared.switchToPane(multiplexerType: multiplexerType, target: target)
 
-        // Find terminal for this specific tmux session
-        if let terminalPid = await findTmuxClientTerminal(forSession: target.session, tree: tree, windows: windows) {
+        // Extract session name from target for terminal lookup
+        let sessionName: String
+        if multiplexerType == .tmux, let tmuxTarget = target as? TmuxTarget {
+            sessionName = tmuxTarget.session
+        } else {
+            // For zellij or other types, we don't have session-based terminal lookup
+            return true
+        }
+
+        // Find terminal for this specific multiplexer session
+        if let terminalPid = await findTmuxClientTerminal(forSession: sessionName, tree: tree, windows: windows) {
             return await WindowFocuser.shared.focusTmuxWindow(terminalPid: terminalPid, windows: windows)
         }
 
@@ -100,48 +117,28 @@ actor YabaiController {
     }
 
     private func focusTmuxPane(forWorkingDir workingDir: String, tree: [Int: ProcessInfo], windows: [YabaiWindow]) async -> Bool {
-        guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else { return false }
-
-        do {
-            let panesOutput = try await ProcessExecutor.shared.run(tmuxPath, arguments: [
-                "list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}|#{pane_pid}"
-            ])
-
-            let panes = panesOutput.components(separatedBy: "\n").filter { !$0.isEmpty }
-
-            for pane in panes {
-                let parts = pane.components(separatedBy: "|")
-                guard parts.count >= 2,
-                      let panePid = Int(parts[1]) else { continue }
-
-                let targetString = parts[0]
-
-                // Check if this pane has a Claude child with matching cwd
-                for (pid, info) in tree {
-                    let isChild = ProcessTreeBuilder.shared.isDescendant(targetPid: pid, ofAncestor: panePid, tree: tree)
-                    let isClaude = info.command.lowercased().contains("claude")
-
-                    guard isChild, isClaude else { continue }
-
-                    guard let cwd = ProcessTreeBuilder.shared.getWorkingDirectory(forPid: pid),
-                          cwd == workingDir else { continue }
-
-                    // Found matching pane - switch to it
-                    if let target = TmuxTarget(from: targetString) {
-                        _ = await TmuxController.shared.switchToPane(target: target)
-
-                        // Focus the terminal window for this session
-                        if let terminalPid = await findTmuxClientTerminal(forSession: target.session, tree: tree, windows: windows) {
-                            return await WindowFocuser.shared.focusTmuxWindow(terminalPid: terminalPid, windows: windows)
-                        }
-                    }
-                    return true
-                }
-            }
-        } catch {
+        // Find the multiplexer target for this working directory
+        guard let (multiplexerType, target) = await TerminalMultiplexer.shared.findTarget(forWorkingDirectory: workingDir) else {
             return false
         }
 
-        return false
+        // Switch to the correct pane
+        _ = await TerminalMultiplexer.shared.switchToPane(multiplexerType: multiplexerType, target: target)
+
+        // Extract session name from target for terminal lookup
+        let sessionName: String?
+        if multiplexerType == .tmux, let tmuxTarget = target as? TmuxTarget {
+            sessionName = tmuxTarget.session
+        } else {
+            sessionName = nil
+        }
+
+        // Find terminal for this specific multiplexer session
+        if let session = sessionName,
+           let terminalPid = await findTmuxClientTerminal(forSession: session, tree: tree, windows: windows) {
+            return await WindowFocuser.shared.focusTmuxWindow(terminalPid: terminalPid, windows: windows)
+        }
+
+        return true
     }
 }

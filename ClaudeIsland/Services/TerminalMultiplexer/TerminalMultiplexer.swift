@@ -85,6 +85,28 @@ actor TerminalMultiplexer {
         }
     }
 
+    /// Find target for a working directory (fallback method)
+    func findTarget(forWorkingDirectory dir: String) async -> (MultiplexerType, Any)? {
+        let multiplexerType = detectMultiplexer()
+
+        switch multiplexerType {
+        case .tmux:
+            if let target = await TmuxController.shared.findTmuxTarget(forWorkingDirectory: dir) {
+                return (.tmux, target)
+            }
+            return nil
+
+        case .zellij:
+            if let target = await ZellijController.shared.findTarget(forWorkingDirectory: dir) {
+                return (.zellij, target)
+            }
+            return nil
+
+        case .none:
+            return nil
+        }
+    }
+
     /// Switch to a target pane
     func switchToPane(multiplexerType: MultiplexerType, target: Any) async -> Bool {
         switch multiplexerType {
