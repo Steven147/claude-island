@@ -21,11 +21,13 @@
 - **Permission Approvals** — Approve or deny tool executions directly from the notch
 - **Chat History** — View full conversation history with markdown rendering
 - **Auto-Setup** — Hooks install automatically on first launch
+- **Terminal Multiplexer Support** — Works with both tmux and zellij (auto-detected)
 
 ## Requirements
 
 - macOS 15.6+
 - Claude Code CLI
+- Terminal multiplexer (optional): tmux or zellij
 
 ## Install
 
